@@ -1,0 +1,109 @@
+name: deploy-app
+
+# Patches the ALREADY RUNNING Deployment's image via `kubectl set image` -
+# this is the actual mechanism that updates what's live, and it never
+# touches Terraform. Dev/qa/staging auto-deploy on push to their matching
+# branch; prod is manual-only and requires referencing an APPROVED
+# production-deploy-request issue (see .github/ISSUE_TEMPLATE).
+
+on:
+  push:
+    branches: [dev, qa, staging]
+    paths:
+      - "apps/sample-app/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy to"
+        required: true
+        type: choice
+        options: [dev, qa, staging, prod]
+      image_tag:
+        description: "Git short-SHA tag to deploy (must already be pushed)"
+        required: true
+      approved_issue_number:
+        description: "Required for prod only: the approved production-deploy-request issue number"
+        required: false
+
+env:
+  APP_NAME: sample-app
+  CONTAINER_NAME: sample-app
+  NAMESPACE: default
+
+jobs:
+  resolve-config:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+    steps:
+      - name: Resolve environment + tag from either trigger
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            env_name="${{ inputs.environment }}"
+            tag="${{ inputs.image_tag }}"
+          else
+            branch="${GITHUB_REF#refs/heads/}"
+            env_name="$branch"
+            tag=$(git rev-parse --short HEAD)
+          fi
+          echo "environment=$env_name" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce prod requires an approved issue
+        if: steps.resolve.outputs.environment == 'prod'
+        run: |
+          if [ -z "${{ inputs.approved_issue_number }}" ]; then
+            echo "::error::Prod deploys require approved_issue_number referencing an approved production-deploy-request issue."
+            exit 1
+          fi
+          # A real implementation would call the GitHub API here to confirm
+          # the issue has an "approved" comment/label before proceeding -
+          # left as an exercise since the API call itself isn't the
+          # interesting part of this pattern; the GATE existing is.
+
+  deploy:
+    needs: resolve-config
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-config.outputs.environment }} # ties into GitHub Environments for a native approval gate too
+    steps:
+      - name: Configure kubeconfig for this environment
+        run: |
+          # Swap this for whatever gets you a working kubeconfig per env:
+          #   local:    kubectl config use-context kind-homelab-pipeline
+          #   proxmox:  scp the k3s kubeconfig, or store it as a secret per env
+          #   aws:      aws eks update-kubeconfig --name homelab-pipeline-${{ needs.resolve-config.outputs.environment }}
+          echo "Set KUBECONFIG for ${{ needs.resolve-config.outputs.environment }} here"
+
+      - name: Deploy new image
+        run: |
+          kubectl set image deployment/${{ env.APP_NAME }} \
+            ${{ env.CONTAINER_NAME }}=${{ vars.REGISTRY }}/${{ env.APP_NAME }}:${{ needs.resolve-config.outputs.image_tag }} \
+            -n ${{ env.NAMESPACE }}
+
+      - name: Wait for rollout
+        id: rollout
+        run: |
+          kubectl rollout status deployment/${{ env.APP_NAME }} -n ${{ env.NAMESPACE }} --timeout=5m
+
+      - name: Diagnose failure
+        if: failure()
+        run: |
+          echo "::group::Deployment describe"
+          kubectl describe deployment/${{ env.APP_NAME }} -n ${{ env.NAMESPACE }}
+          echo "::endgroup::"
+          echo "::group::Pods"
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app=${{ env.APP_NAME }}
+          echo "::endgroup::"
+          echo "::group::Recent logs (previous container, in case of crash loop)"
+          kubectl logs -n ${{ env.NAMESPACE }} -l app=${{ env.APP_NAME }} --previous --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::Events"
+          kubectl get events -n ${{ env.NAMESPACE }} --sort-by=.lastTimestamp | tail -30
+          echo "::endgroup::"
+
+      - name: Roll back on timeout
+        if: failure() && vars.ROLLBACK_ON_TIMEOUT == 'true'
+        run: |
+          kubectl rollout undo deployment/${{ env.APP_NAME }} -n ${{ env.NAMESPACE }}

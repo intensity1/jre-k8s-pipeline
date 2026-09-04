@@ -1,0 +1,66 @@
+name: build-image-proxmox
+
+# Mirrors the enterprise pattern: check daily, only actually build when the
+# upstream base image changed. Requires a SELF-HOSTED runner with network
+# access to your Proxmox host - a GitHub-hosted runner cannot reach a
+# homelab network. Install the self-hosted runner from your repo's
+# Settings -> Actions -> Runners, on any machine on your Proxmox network.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *" # daily, 6am UTC - adjust to your timezone
+
+jobs:
+  check-and-build:
+    runs-on: self-hosted
+    defaults:
+      run:
+        working-directory: image-pipeline/packer/proxmox
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Query Proxmox for the newest cloud-init base image checksum
+        id: upstream
+        run: |
+          # Real check: compare the published Ubuntu cloud-image checksum
+          # file against what we last built from. Simplified here to the
+          # shape of the check; fill in the actual curl/diff against
+          # https://cloud-images.ubuntu.com/noble/current/SHA256SUMS
+          echo "latest=$(curl -s https://cloud-images.ubuntu.com/noble/current/SHA256SUMS | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Compare against last known build
+        id: diff
+        run: |
+          last="none"
+          if [ -f latest-known.txt ]; then last=$(cat latest-known.txt); fi
+          if [ "$last" == "${{ steps.upstream.outputs.latest }}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip - nothing changed
+        if: steps.diff.outputs.changed == 'false'
+        run: echo "No new upstream base image. Skipping build."
+
+      - name: Packer build
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          PKR_VAR_proxmox_api_url: ${{ secrets.PROXMOX_API_URL }}
+          PKR_VAR_proxmox_api_token_id: ${{ secrets.PROXMOX_API_TOKEN_ID }}
+          PKR_VAR_proxmox_api_token_secret: ${{ secrets.PROXMOX_API_TOKEN_SECRET }}
+          PKR_VAR_proxmox_node: ${{ secrets.PROXMOX_NODE }}
+        run: |
+          packer init .
+          packer build .
+
+      - name: Record new baseline
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.upstream.outputs.latest }}" > latest-known.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add latest-known.txt
+          git commit -m "chore: update latest known base image checksum"
+          git push

@@ -1,0 +1,7 @@
+---
+# Ansible Galaxy collection dependencies for the hardening playbook.
+# Install before running Packer's ansible provisioner:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.general # provides the ufw module used by baseline-hardening
+    version: ">=8.0.0"

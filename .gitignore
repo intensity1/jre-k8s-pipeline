@@ -1,15 +1,15 @@
-# Terraform
+.terraform/
 *.tfstate
 *.tfstate.*
-.terraform/
-.terraform.lock.hcl
 *.tfvars
 !*.tfvars.example
-
-# Kubernetes
-kubeconfig
-*.kubeconfig
-
-# OS junk
-.DS_Store
-Thumbs.db
+crash.log
+*.env
+.env
+kubeconfig*
+latest-known.txt
+__pycache__/
+*.pyc
+packer_cache/
+*.pkrvars.hcl
+!*.pkrvars.hcl.example

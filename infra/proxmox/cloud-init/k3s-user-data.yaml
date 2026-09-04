@@ -1,0 +1,21 @@
+#cloud-config
+# Cloud-init snippet that installs single-node k3s on first boot.
+#
+# Upload this to a Proxmox storage that supports "snippets" (e.g. local),
+# then reference it from main.tf's initialization.user_data_file_id.
+#
+# WHY k3s bootstrap is a cloud-init snippet and not baked into the golden
+# image itself: keeping the Kubernetes runtime install as a first-boot step
+# (rather than baked into the Packer image) means the SAME hardened base
+# image can be reused for non-Kubernetes VMs too, if you ever want that.
+# This is a reasonable, debatable choice — baking k3s directly into the
+# image via the Ansible hardening playbook instead is equally valid and
+# arguably simpler for a single-purpose homelab. Documented here as a
+# decision point, not a hard rule.
+
+runcmd:
+  - curl -sfL https://get.k3s.io | sh -
+  - sleep 10
+  - cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/k3s.yaml
+  - chown ubuntu:ubuntu /home/ubuntu/k3s.yaml
+  - echo "k3s installed. Fetch kubeconfig with: scp ubuntu@<vm-ip>:k3s.yaml ./kubeconfig-proxmox.yaml"

@@ -1,0 +1,24 @@
+# Self-hosted Atlantis — the same PR-driven plan/apply engine used in the
+# enterprise pattern this repo models. Comment `atlantis plan` / `atlantis
+# apply` on a pull request that touches infra/, and Atlantis runs Terraform
+# for you, posting the plan output back as a PR comment for review before
+# anyone applies.
+
+services:
+  atlantis:
+    image: ghcr.io/runatlantis/atlantis:latest
+    restart: unless-stopped
+    ports:
+      - "4141:4141"
+    environment:
+      ATLANTIS_REPO_ALLOWLIST: "github.com/YOUR_GH_USERNAME/YOUR_REPO_NAME"
+      ATLANTIS_GH_USER: "${ATLANTIS_GH_USER}"
+      ATLANTIS_GH_TOKEN: "${ATLANTIS_GH_TOKEN}"       # a GitHub PAT with repo scope - store in a .env file, never commit it
+      ATLANTIS_GH_WEBHOOK_SECRET: "${ATLANTIS_GH_WEBHOOK_SECRET}"
+      ATLANTIS_PORT: "4141"
+      ATLANTIS_ATLANTIS_URL: "${ATLANTIS_PUBLIC_URL}" # e.g. https://atlantis.yourdomain.com or an ngrok URL for testing
+    volumes:
+      - atlantis-data:/atlantis-data
+
+volumes:
+  atlantis-data:

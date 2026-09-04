@@ -1,0 +1,81 @@
+---
+# Installs osquery as the free, real security-telemetry agent equivalent to
+# a commercial EDR product. osquery is genuinely used in production
+# environments for endpoint visibility (not a toy substitute) — it exposes
+# system state (processes, network connections, installed packages, etc.)
+# as queryable SQL tables and can ship results to a log pipeline.
+#
+# Swap this role out for Wazuh (heavier, adds real-time detection + a
+# management server) if you want closer-to-commercial-EDR behavior. osquery
+# is the lighter-weight starting point and is enough to prove the
+# "agent baked in at build time, not after boot" pattern.
+#
+# Requires the community.general collection (for the ufw tasks in
+# baseline-hardening) — see image-pipeline/ansible/requirements.yml.
+
+- name: Ensure keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Download the osquery apt signing key
+  ansible.builtin.get_url:
+    url: https://pkg.osquery.io/deb/pubkey.gpg
+    dest: /etc/apt/keyrings/osquery.asc
+    mode: "0644"
+
+# apt-key (and Ansible's apt_key module) is deprecated/removed - modern
+# Debian/Ubuntu practice is a dearmored keyring referenced via signed-by=
+# in the repo line, which is what the two tasks below do.
+- name: Dearmor the osquery signing key
+  ansible.builtin.command:
+    cmd: gpg --dearmor -o /etc/apt/keyrings/osquery.gpg /etc/apt/keyrings/osquery.asc
+    creates: /etc/apt/keyrings/osquery.gpg
+
+- name: Add the osquery apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/osquery.gpg] https://pkg.osquery.io/deb deb main"
+    state: present
+    filename: osquery
+
+- name: Install osquery
+  ansible.builtin.apt:
+    name: osquery
+    state: present
+    update_cache: true
+
+- name: Deploy a baseline osquery config
+  ansible.builtin.copy:
+    dest: /etc/osquery/osquery.conf
+    mode: "0644"
+    content: |
+      {
+        "options": {
+          "config_plugin": "filesystem",
+          "logger_plugin": "filesystem",
+          "logger_path": "/var/log/osquery",
+          "disable_events": "false",
+          "utc": "true"
+        },
+        "schedule": {
+          "listening_ports": {
+            "query": "SELECT * FROM listening_ports;",
+            "interval": 300
+          },
+          "logged_in_users": {
+            "query": "SELECT * FROM logged_in_users;",
+            "interval": 300
+          },
+          "os_version": {
+            "query": "SELECT * FROM os_version;",
+            "interval": 3600
+          }
+        }
+      }
+
+- name: Enable and start osqueryd
+  ansible.builtin.systemd:
+    name: osqueryd
+    enabled: true
+    state: started

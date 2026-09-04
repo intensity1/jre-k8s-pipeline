@@ -1,0 +1,26 @@
+version: 3
+projects:
+  - name: local
+    dir: infra/local
+    workflow: default
+    apply_requirements: [approved]
+
+  - name: proxmox
+    dir: infra/proxmox
+    workflow: default
+    apply_requirements: [approved]
+
+  - name: aws
+    dir: infra/aws
+    workflow: default
+    apply_requirements: [approved]
+
+workflows:
+  default:
+    plan:
+      steps:
+        - init
+        - plan
+    apply:
+      steps:
+        - apply

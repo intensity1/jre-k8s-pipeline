@@ -1,0 +1,14 @@
+# Copy this file to variables.pkrvars.hcl and fill in real values, OR pass
+# via -var flags / PKR_VAR_ environment variables. AWS credentials
+# themselves come from your normal AWS CLI config/profile — never
+# hardcode keys in this file or in the .pkr.hcl itself.
+#
+# Naming matters here: this file must NOT be named *.pkr.hcl. Packer loads
+# every *.pkr.hcl file in a directory as part of the build template, and
+# bare `key = value` lines (which is what a vars file is) are not valid
+# inside a template file — only variable {}/source {}/build {} blocks are.
+# The .pkrvars.hcl extension is Packer's actual vars-file convention.
+
+aws_region          = "us-east-1"
+instance_type       = "t3.micro"
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"

@@ -1,0 +1,61 @@
+name: build-push-app
+
+# Builds the sample app's container image and pushes it, tagged with the
+# short git SHA. Registry is parameterized via repo variables so the same
+# workflow works whether you're pushing to a local registry, GHCR, or ECR.
+
+on:
+  push:
+    branches: [dev, qa, staging, main]
+    paths:
+      - "apps/sample-app/**"
+      - ".github/workflows/build-push-app.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ${{ vars.REGISTRY }}       # e.g. ghcr.io/your-username, or <acct>.dkr.ecr.us-east-1.amazonaws.com
+  IMAGE_NAME: sample-app
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # needed if REGISTRY is ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute short SHA tag
+        id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: startsWith(env.REGISTRY, 'ghcr.io')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # If REGISTRY is an ECR endpoint instead, swap the above step for:
+      #   - uses: aws-actions/configure-aws-credentials@v4 ...
+      #   - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Skip if this tag already exists
+        id: check
+        run: |
+          if docker manifest inspect "$REGISTRY/$IMAGE_NAME:${{ steps.meta.outputs.tag }}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        if: steps.check.outputs.exists == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/sample-app
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.tag }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}

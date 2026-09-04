@@ -1,0 +1,74 @@
+name: build-image-aws
+
+# Same "check daily, build only if changed" pattern as
+# build-image-proxmox.yml, but for the AWS AMI. This one CAN run on a
+# standard GitHub-hosted runner since it only needs internet + AWS API
+# access, not a homelab network.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  id-token: write # for OIDC auth to AWS - see comment below
+  contents: write
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: image-pipeline/packer/aws
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Set up an IAM OIDC identity provider trusting
+          # token.actions.githubusercontent.com, and a role this workflow
+          # can assume - avoids storing long-lived AWS keys as secrets.
+          role-to-assume: ${{ secrets.AWS_BUILD_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Query AWS for the newest Canonical Ubuntu AMI
+        id: upstream
+        run: |
+          latest=$(aws ec2 describe-images \
+            --owners 099720109477 \
+            --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+            --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
+            --output text)
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Compare against last known build
+        id: diff
+        run: |
+          last="none"
+          if [ -f latest-known.txt ]; then last=$(cat latest-known.txt); fi
+          if [ "$last" == "${{ steps.upstream.outputs.latest }}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Packer
+        if: steps.diff.outputs.changed == 'true'
+        uses: hashicorp/setup-packer@v3
+
+      - name: Packer build
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          packer init .
+          packer build .
+
+      - name: Record new baseline
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.upstream.outputs.latest }}" > latest-known.txt
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add latest-known.txt
+          git commit -m "chore: update latest known base AMI"
+          git push

@@ -1,0 +1,90 @@
+# Proxmox target — clones the newest hardened template built by
+# image-pipeline/packer/proxmox, boots it as a real VM, and installs
+# single-node k3s via cloud-init so Kubernetes has something to run on.
+#
+# Provider choice: bpg/proxmox (terraform-provider-proxmox by bpg) rather
+# than the older Telmate/proxmox provider. bpg/proxmox is the actively
+# maintained, more modern option as of this writing and is the one
+# generally recommended in current Proxmox+Terraform community guidance —
+# Telmate's is still widely used but has a much slower release cadence.
+
+terraform {
+  required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.66"
+    }
+  }
+}
+
+provider "proxmox" {
+  endpoint  = var.proxmox_api_url
+  api_token = var.proxmox_api_token
+  insecure  = true # homelab self-signed cert; set false with a real cert
+}
+
+# Replicates AWS's `most_recent = true` AMI lookup, since the Proxmox
+# provider has no native equivalent data source. See scripts/README for
+# how this works.
+data "external" "latest_template" {
+  program = ["python3", "${path.module}/scripts/find_latest_template.py"]
+
+  query = {
+    # `query` values aren't used by the script (env vars are), but the
+    # external provider requires this attribute to be present.
+    trigger = "lookup"
+  }
+}
+
+# Uploads the k3s bootstrap cloud-init snippet so the VM can reference it.
+# Requires a storage backend with "Snippets" content enabled (Datacenter ->
+# Storage -> <your storage> -> Content -> check "Snippets").
+resource "proxmox_virtual_environment_file" "k3s_userdata" {
+  content_type = "snippets"
+  datastore_id = var.snippet_storage
+  node_name    = var.proxmox_node
+
+  source_raw {
+    data      = file("${path.module}/cloud-init/k3s-user-data.yaml")
+    file_name = "k3s-user-data.yaml"
+  }
+}
+
+resource "proxmox_virtual_environment_vm" "k8s_node" {
+  name      = "homelab-k8s-node-01"
+  node_name = var.proxmox_node
+
+  clone {
+    vm_id = tonumber(data.external.latest_template.result.vmid)
+    full  = true
+  }
+
+  cpu {
+    cores = 2
+  }
+
+  memory {
+    dedicated = 4096
+  }
+
+  initialization {
+    ip_config {
+      ipv4 {
+        address = "dhcp"
+      }
+    }
+    user_data_file_id = proxmox_virtual_environment_file.k3s_userdata.id
+  }
+
+  network_device {
+    bridge = var.network_bridge
+  }
+}
+
+output "cloned_from_template" {
+  value = data.external.latest_template.result.name
+}
+
+output "node_ip_lookup_hint" {
+  value = "Check the Proxmox console for this VM's DHCP-assigned IP, then: scp ubuntu@<ip>:k3s.yaml ./kubeconfig-proxmox.yaml"
+}

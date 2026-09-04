@@ -1,0 +1,16 @@
+# Copy this file to variables.pkrvars.hcl and fill in real values, OR pass
+# via -var flags / PKR_VAR_ environment variables. Never commit real
+# values — this file is intentionally left as a template.
+#
+# Naming matters here: this file must NOT be named *.pkr.hcl. Packer loads
+# every *.pkr.hcl file in a directory as part of the build template, and
+# bare `key = value` lines (which is what a vars file is) are not valid
+# inside a template file — only variable {}/source {}/build {} blocks are.
+# The .pkrvars.hcl extension is Packer's actual vars-file convention.
+
+proxmox_api_url          = "https://proxmox.homelab.local:8006/api2/json"
+proxmox_api_token_id     = "packer@pve!packer-token"
+proxmox_api_token_secret = "REPLACE_ME"
+proxmox_node             = "pve"
+clone_vmid               = 9000
+ssh_public_key_path      = "~/.ssh/id_ed25519.pub"
