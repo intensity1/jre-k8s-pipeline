@@ -72,6 +72,10 @@ build {
 
   provisioner "ansible" {
     playbook_file = "../../ansible/hardening.yml"
+    # See the matching comment in the Proxmox template — without this, the
+    # plugin's proxy-adapter mode generates an inventory using the local
+    # control machine's OS username instead of the actual remote account.
+    user = "ubuntu"
     extra_arguments = [
       "--extra-vars", "image_build_date=${local.build_timestamp}"
     ]

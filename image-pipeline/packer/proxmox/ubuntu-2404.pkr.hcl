@@ -118,6 +118,15 @@ build {
 
   provisioner "ansible" {
     playbook_file = "../../ansible/hardening.yml"
+    # Without this, the plugin's proxy-adapter mode generates an inventory
+    # using the LOCAL control machine's OS username instead of the actual
+    # remote account (ssh_username above) — confirmed by inspecting the
+    # generated inventory directly: it showed "ansible_user=homenest" (a
+    # WSL-local user that doesn't exist on the VM at all) instead of
+    # "ubuntu". That silently-wrong user is what broke every remote path
+    # Ansible tried to construct, surfacing as a confusing "No space left
+    # on device" on a tiny mkdir rather than a clear auth/user error.
+    user = "ubuntu"
     extra_arguments = [
       "--extra-vars", "image_build_date=${local.build_timestamp}"
     ]
