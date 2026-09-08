@@ -77,6 +77,15 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
     dedicated = 4096
   }
 
+  # Tells Terraform to actually wait for and query the QEMU guest agent
+  # (baked into the golden image — see docs/packer-explained.md) rather
+  # than just hoping it's there. This is what makes ipv4_addresses below a
+  # real value instead of an empty list: without it, apply can finish
+  # before the agent's ever been asked.
+  agent {
+    enabled = true
+  }
+
   initialization {
     # Without this, cloned nodes have no way to log in at all — the golden
     # image deliberately has no baked-in key (see docs/packer-explained.md),
@@ -103,6 +112,15 @@ output "cloned_from_template" {
   value = data.external.latest_template.result.name
 }
 
-output "node_ip_lookup_hint" {
-  value = "Check the Proxmox console for this VM's DHCP-assigned IP, then: scp ubuntu@<ip>:k3s.yaml ./kubeconfig-proxmox.yaml"
+output "node_ip" {
+  description = "The k3s node's LAN IP, read via the QEMU guest agent — no console/ARP-sweep needed now that the golden image has the agent baked in."
+  # index [0] is always loopback (127.0.0.1); index [1] is the first
+  # (and here, only) network_device. try() avoids an error on the first
+  # apply of a brand-new VM, before the agent has reported in yet.
+  value = try(proxmox_virtual_environment_vm.k8s_node.ipv4_addresses[1][0], "not yet reported — re-run 'terraform apply' or 'terraform refresh' once the VM has booted")
+}
+
+output "fetch_kubeconfig_cmd" {
+  description = "Copy-pasteable command to pull the kubeconfig off the node."
+  value       = "scp -i ~/.ssh/homelab_pipeline_key ubuntu@${try(proxmox_virtual_environment_vm.k8s_node.ipv4_addresses[1][0], "<ip-not-yet-known>")}:k3s.yaml ./kubeconfig-proxmox.yaml"
 }
