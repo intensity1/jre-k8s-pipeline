@@ -34,15 +34,26 @@
     # running, which itself can fail with "No space left on device" if
     # growpart hasn't freed up room yet — the exact chicken-and-egg this
     # task exists to avoid. `raw` executes directly over the SSH
-    # connection with no staging at all. The trailing `; true` discards
-    # cloud-init's own exit code — Proxmox's built-in cloud-init
+    # connection with no staging at all.
+    #
+    # Polls with short, separate checks (until/retries/delay) rather than
+    # a single blocking `cloud-init status --wait` call — confirmed that
+    # approach can die mid-wait ("Shared connection ... closed", with
+    # --wait's own progress dots cut off in the output) when held open
+    # too long through the ansible proxy adapter. Each retry here is a
+    # quick, independent command instead of one long-lived blocked
+    # connection. "not in" checks for the word "running" rather than
+    # requiring an exact "done", since Proxmox's built-in cloud-init
     # integration uses an old deprecated config syntax to inject Packer's
     # ephemeral SSH key (nothing in this repo's own config), which makes
-    # cloud-init report "degraded done" (exit code 2) even on a fully
-    # successful run — confirmed via `cloud-init status --long` showing a
-    # clean "status: done" alongside just that one benign notice.
+    # cloud-init report "degraded done" rather than a clean "done" even on
+    # a fully successful run — confirmed via `cloud-init status --long`.
     - name: Wait for cloud-init to finish
-      ansible.builtin.raw: cloud-init status --wait; true
+      ansible.builtin.raw: cloud-init status
+      register: cloud_init_check
+      until: "'status: running' not in cloud_init_check.stdout"
+      retries: 60
+      delay: 5
       changed_when: false
 
     # cloud-init reporting "done" turned out NOT to reliably mean growpart
