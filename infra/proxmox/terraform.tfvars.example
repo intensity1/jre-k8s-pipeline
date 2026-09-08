@@ -1,8 +1,9 @@
-proxmox_api_url   = "https://proxmox.homelab.local:8006/api2/json"
-proxmox_api_token = "REPLACE_ME"
-proxmox_node      = "pve"
-snippet_storage   = "local"
-network_bridge    = "vmbr0"
+proxmox_api_url       = "https://proxmox.homelab.local:8006/api2/json"
+proxmox_api_token     = "REPLACE_ME"
+proxmox_node          = "pve"
+snippet_storage       = "local"
+network_bridge        = "vmbr0"
+ssh_private_key_path  = "/home/youruser/.ssh/id_ed25519"   # absolute path — must be root-authorized on the Proxmox node
 
 # Also required as ENVIRONMENT VARIABLES (not read directly by Terraform,
 # but needed by scripts/find_latest_template.py during `terraform apply`):

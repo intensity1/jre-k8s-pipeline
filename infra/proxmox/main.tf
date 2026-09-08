@@ -21,6 +21,16 @@ provider "proxmox" {
   endpoint  = var.proxmox_api_url
   api_token = var.proxmox_api_token
   insecure  = true # homelab self-signed cert; set false with a real cert
+
+  # Required for proxmox_virtual_environment_file: uploading content
+  # (like the k3s snippet below) goes over SSH to the node directly, not
+  # through the REST API — the bpg/proxmox provider's own design, not
+  # something the Proxmox API itself is missing.
+  ssh {
+    agent       = false
+    username    = "root"
+    private_key = file(var.ssh_private_key_path)
+  }
 }
 
 # Replicates AWS's `most_recent = true` AMI lookup, since the Proxmox

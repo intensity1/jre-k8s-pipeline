@@ -23,3 +23,8 @@ variable "network_bridge" {
   type    = string
   default = "vmbr0"
 }
+
+variable "ssh_private_key_path" {
+  type        = string
+  description = "Path to a private key authorized for root SSH on the Proxmox node itself. Required by the bpg/proxmox provider for file-upload operations (e.g. the k3s snippet) — these go over SSH, not the REST API. Must be an absolute path; Terraform's file() does not expand '~'."
+}
