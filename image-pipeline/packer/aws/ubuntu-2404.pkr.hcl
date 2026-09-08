@@ -46,6 +46,11 @@ source "amazon-ebs" "hardened_ubuntu" {
   instance_type = var.instance_type
   ssh_username  = "ubuntu"
 
+  # See the matching comment in the Proxmox template — Packer's default
+  # SCP-based file transfer is a known source of upload hangs against
+  # recent OpenSSH server versions.
+  ssh_file_transfer_method = "sftp"
+
   source_ami_filter {
     filters = {
       name                = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"

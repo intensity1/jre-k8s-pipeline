@@ -107,6 +107,13 @@ source "proxmox-clone" "hardened_ubuntu" {
   ssh_private_key_file = replace(var.ssh_public_key_path, ".pub", "")
   ssh_timeout          = "10m"
 
+  # Packer's SCP-based file transfer (the default) hung uploading even a
+  # trivial one-line script against this VM, consistently failing after
+  # ~5.5 minutes regardless of script content — a known class of
+  # incompatibility between Packer's built-in SCP client and very recent
+  # OpenSSH server versions (Ubuntu 24.04 ships one). Force SFTP instead.
+  ssh_file_transfer_method = "sftp"
+
   # After provisioning, convert the resulting VM into a new template —
   # this IS the finished, hardened golden image other Terraform will clone.
   template_name        = local.image_name
