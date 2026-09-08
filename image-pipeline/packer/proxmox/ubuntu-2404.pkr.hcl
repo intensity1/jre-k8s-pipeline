@@ -90,6 +90,19 @@ source "proxmox-clone" "hardened_ubuntu" {
   memory   = 2048
   scsi_controller = "virtio-scsi-pci"
 
+  # Proved necessary by direct comparison against Proxmox's own native
+  # `qm clone --full 1`, which correctly preserved the source's actual
+  # (resized, 23.5G) disk size — while this plugin's clone, run with
+  # identical full_clone=true and no explicit disks block, silently
+  # produced a ~3.5G disk instead. Whatever this plugin's default clone
+  # behavior is, it isn't "inherit the source's real current size" —
+  # declare it explicitly instead of trusting inheritance.
+  disks {
+    disk_size    = "24G"
+    storage_pool = "local-lvm"
+    type         = "scsi"
+  }
+
   cloud_init              = true
   cloud_init_storage_pool = "local-lvm"
 
