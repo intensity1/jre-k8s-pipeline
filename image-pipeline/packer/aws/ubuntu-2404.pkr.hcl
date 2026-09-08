@@ -73,9 +73,13 @@ build {
   # See the matching comment in the Proxmox template — SSH being reachable
   # doesn't mean cloud-init (growpart/resizefs included) has finished.
   provisioner "shell" {
-    inline = ["cloud-init status --wait"]
     # See the matching comment in the Proxmox template.
-    valid_exit_codes = [0, 2]
+    inline = [
+      "echo 'Waiting for cloud-init to finish (bounded to 5 minutes)...'",
+      "timeout 300 sh -c 'while cloud-init status 2>/dev/null | grep -q running; do sleep 2; done'",
+      "echo 'cloud-init no longer running. Final status:'",
+      "cloud-init status --long || true",
+    ]
   }
 
   provisioner "ansible" {

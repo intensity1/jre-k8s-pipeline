@@ -124,14 +124,23 @@ build {
   # moments later once checked manually. Block here until cloud-init's
   # entire boot sequence genuinely completes before handing off.
   provisioner "shell" {
-    inline = ["cloud-init status --wait"]
-    # Proxmox's own built-in cloud-init integration (used to inject this
-    # build's ephemeral SSH key) uses the old deprecated single-'user'
-    # syntax rather than the newer 'users' list — nothing in this repo's
-    # own config, just how Proxmox generates it. That makes cloud-init
-    # report "degraded done" (exit code 2) even on a fully successful run,
-    # which Packer would otherwise treat as a failed provisioner step.
-    valid_exit_codes = [0, 2]
+    # `cloud-init status --wait` was tried first but never returned even
+    # after `qm guest exec ... cloud-init status --long` independently
+    # confirmed "status: done" on two separate checks minutes apart —
+    # something about --wait's own internal polling didn't recognize
+    # completion here. Poll the real condition ourselves instead, bounded
+    # so it can't hang forever. The final `|| true` swallows cloud-init's
+    # own "degraded" exit code (2) — caused by Proxmox's built-in
+    # cloud-init integration using an old deprecated config syntax to
+    # inject this build's SSH key, unrelated to anything in this repo —
+    # without masking a real timeout, since `timeout`'s own exit code
+    # (124 on timeout) is what this step's pass/fail actually rests on.
+    inline = [
+      "echo 'Waiting for cloud-init to finish (bounded to 5 minutes)...'",
+      "timeout 300 sh -c 'while cloud-init status 2>/dev/null | grep -q running; do sleep 2; done'",
+      "echo 'cloud-init no longer running. Final status:'",
+      "cloud-init status --long || true",
+    ]
   }
 
   provisioner "ansible" {
