@@ -45,7 +45,23 @@
       ansible.builtin.raw: cloud-init status --wait; true
       changed_when: false
 
-    - name: Now that cloud-init (and growpart) has finished, gather facts
+    # cloud-init reporting "done" turned out NOT to reliably mean growpart
+    # has actually finished growing the root filesystem on this image —
+    # confirmed directly: this exact next step still hit "No space left on
+    # device" immediately after the wait above succeeded. Stop trusting
+    # cloud-init's status as a proxy and poll the real thing instead: the
+    # filesystem's actual free space. Bounded to 2 minutes; still via raw,
+    # since this can't rely on any space existing yet either.
+    - name: Wait for the root filesystem to actually have free space
+      ansible.builtin.raw: |
+        for i in $(seq 1 60); do
+          avail=$(df --output=avail / | tail -1 | tr -d ' ')
+          if [ "$avail" -gt 1000000 ]; then echo "FREE_SPACE_OK: ${avail}K available"; break; fi
+          sleep 2
+        done
+      changed_when: false
+
+    - name: Now that the disk actually has room, gather facts
       ansible.builtin.setup:
 
   roles:
