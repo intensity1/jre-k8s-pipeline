@@ -47,18 +47,21 @@
 
     # cloud-init reporting "done" turned out NOT to reliably mean growpart
     # has actually finished growing the root filesystem on this image —
-    # confirmed directly: this exact next step still hit "No space left on
-    # device" immediately after the wait above succeeded. Stop trusting
-    # cloud-init's status as a proxy and poll the real thing instead: the
-    # filesystem's actual free space. Bounded to 2 minutes; still via raw,
-    # since this can't rely on any space existing yet either.
-    - name: Wait for the root filesystem to actually have free space
+    # confirmed directly: a follow-up task still hit "No space left on
+    # device" immediately after the wait above succeeded, and a 2-minute
+    # poll for free space (tried next) never once saw it materialize
+    # either. Rather than keep waiting on cloud-init's own automatic
+    # growpart/resizefs — whatever is wrong with its timing here, or
+    # whether it's running at all — just do the resize ourselves,
+    # directly and idempotently. growpart/resize2fs are pre-installed on
+    # Ubuntu's cloud images (cloud-init depends on them for this exact
+    # purpose) and are both safe to run even if already at full size —
+    # growpart reports NOCHANGE, resize2fs is a no-op.
+    - name: Ensure the root partition and filesystem actually use the full disk
       ansible.builtin.raw: |
-        for i in $(seq 1 60); do
-          avail=$(df --output=avail / | tail -1 | tr -d ' ')
-          if [ "$avail" -gt 1000000 ]; then echo "FREE_SPACE_OK: ${avail}K available"; break; fi
-          sleep 2
-        done
+        growpart /dev/sda 1 || true
+        resize2fs /dev/sda1 || true
+        df -h /
       changed_when: false
 
     - name: Now that the disk actually has room, gather facts
