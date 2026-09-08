@@ -125,6 +125,13 @@ build {
   # entire boot sequence genuinely completes before handing off.
   provisioner "shell" {
     inline = ["cloud-init status --wait"]
+    # Proxmox's own built-in cloud-init integration (used to inject this
+    # build's ephemeral SSH key) uses the old deprecated single-'user'
+    # syntax rather than the newer 'users' list — nothing in this repo's
+    # own config, just how Proxmox generates it. That makes cloud-init
+    # report "degraded done" (exit code 2) even on a fully successful run,
+    # which Packer would otherwise treat as a failed provisioner step.
+    valid_exit_codes = [0, 2]
   }
 
   provisioner "ansible" {

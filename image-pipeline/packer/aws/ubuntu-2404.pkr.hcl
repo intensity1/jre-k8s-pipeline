@@ -74,6 +74,8 @@ build {
   # doesn't mean cloud-init (growpart/resizefs included) has finished.
   provisioner "shell" {
     inline = ["cloud-init status --wait"]
+    # See the matching comment in the Proxmox template.
+    valid_exit_codes = [0, 2]
   }
 
   provisioner "ansible" {
