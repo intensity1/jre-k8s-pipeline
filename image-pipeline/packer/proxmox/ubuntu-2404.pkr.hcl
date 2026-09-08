@@ -116,6 +116,17 @@ source "proxmox-clone" "hardened_ubuntu" {
 build {
   sources = ["source.proxmox-clone.hardened_ubuntu"]
 
+  # SSH becoming reachable does NOT mean cloud-init has finished everything
+  # — growpart/resizefs in particular can still be running in the
+  # background at that exact moment. Confirmed by direct inspection: a
+  # clone's root filesystem showed only its original pre-resize size
+  # immediately when Ansible's first task ran, then the full resized disk
+  # moments later once checked manually. Block here until cloud-init's
+  # entire boot sequence genuinely completes before handing off.
+  provisioner "shell" {
+    inline = ["cloud-init status --wait"]
+  }
+
   provisioner "ansible" {
     playbook_file = "../../ansible/hardening.yml"
     # Without this, the plugin's proxy-adapter mode generates an inventory

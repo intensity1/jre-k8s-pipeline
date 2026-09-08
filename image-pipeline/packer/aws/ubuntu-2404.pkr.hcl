@@ -70,6 +70,12 @@ source "amazon-ebs" "hardened_ubuntu" {
 build {
   sources = ["source.amazon-ebs.hardened_ubuntu"]
 
+  # See the matching comment in the Proxmox template — SSH being reachable
+  # doesn't mean cloud-init (growpart/resizefs included) has finished.
+  provisioner "shell" {
+    inline = ["cloud-init status --wait"]
+  }
+
   provisioner "ansible" {
     playbook_file = "../../ansible/hardening.yml"
     # See the matching comment in the Proxmox template — without this, the
