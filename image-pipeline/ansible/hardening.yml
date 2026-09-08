@@ -8,6 +8,11 @@
 - name: Harden base image and install security agent
   hosts: default
   become: true
+  # Disabled here and re-enabled explicitly as the second pre_task below.
+  # Ansible's automatic fact-gathering is normally the very first thing
+  # that runs in a play — before pre_tasks — which meant it was racing
+  # cloud-init's growpart/resizefs and hitting the pre-resize disk size.
+  gather_facts: false
   vars:
     # Overridden per-build by Packer's extra_arguments / ansible_env_vars
     # if you want build-time metadata baked into motd/files. Not required
@@ -24,17 +29,24 @@
     # see docs/packer-explained.md). Ansible's own connection path proved
     # reliable throughout, so the wait now runs through it instead.
     #
-    # failed_when accepts rc 2 alongside 0: Proxmox's own built-in
-    # cloud-init integration (used to inject Packer's ephemeral SSH key)
-    # uses the old deprecated single-'user' config syntax, which makes
+    # Uses `raw`, not `command`/`shell`, deliberately: normal Ansible
+    # modules stage themselves into a remote temp directory before
+    # running, which itself can fail with "No space left on device" if
+    # growpart hasn't freed up room yet — the exact chicken-and-egg this
+    # task exists to avoid. `raw` executes directly over the SSH
+    # connection with no staging at all. The trailing `; true` discards
+    # cloud-init's own exit code — Proxmox's built-in cloud-init
+    # integration uses an old deprecated config syntax to inject Packer's
+    # ephemeral SSH key (nothing in this repo's own config), which makes
     # cloud-init report "degraded done" (exit code 2) even on a fully
     # successful run — confirmed via `cloud-init status --long` showing a
-    # clean "status: done" with only that one benign deprecation notice.
+    # clean "status: done" alongside just that one benign notice.
     - name: Wait for cloud-init to finish
-      ansible.builtin.command: cloud-init status --wait
-      register: cloud_init_wait
+      ansible.builtin.raw: cloud-init status --wait; true
       changed_when: false
-      failed_when: cloud_init_wait.rc not in [0, 2]
+
+    - name: Now that cloud-init (and growpart) has finished, gather facts
+      ansible.builtin.setup:
 
   roles:
     - baseline-hardening
