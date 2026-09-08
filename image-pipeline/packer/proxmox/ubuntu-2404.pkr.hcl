@@ -123,33 +123,15 @@ source "proxmox-clone" "hardened_ubuntu" {
 build {
   sources = ["source.proxmox-clone.hardened_ubuntu"]
 
-  # SSH becoming reachable does NOT mean cloud-init has finished everything
-  # — growpart/resizefs in particular can still be running in the
-  # background at that exact moment. Confirmed by direct inspection: a
-  # clone's root filesystem showed only its original pre-resize size
-  # immediately when Ansible's first task ran, then the full resized disk
-  # moments later once checked manually. Block here until cloud-init's
-  # entire boot sequence genuinely completes before handing off.
-  provisioner "shell" {
-    # `cloud-init status --wait` was tried first but never returned even
-    # after `qm guest exec ... cloud-init status --long` independently
-    # confirmed "status: done" on two separate checks minutes apart —
-    # something about --wait's own internal polling didn't recognize
-    # completion here. Poll the real condition ourselves instead, bounded
-    # so it can't hang forever. The final `|| true` swallows cloud-init's
-    # own "degraded" exit code (2) — caused by Proxmox's built-in
-    # cloud-init integration using an old deprecated config syntax to
-    # inject this build's SSH key, unrelated to anything in this repo —
-    # without masking a real timeout, since `timeout`'s own exit code
-    # (124 on timeout) is what this step's pass/fail actually rests on.
-    inline = [
-      "echo 'Waiting for cloud-init to finish (bounded to 5 minutes)...'",
-      "timeout 300 sh -c 'while cloud-init status 2>/dev/null | grep -q running; do sleep 2; done'",
-      "echo 'cloud-init no longer running. Final status:'",
-      "cloud-init status --long || true",
-    ]
-  }
-
+  # The cloud-init-readiness wait used to live here as a standalone "shell"
+  # provisioner, but Packer's own native file-upload mechanism proved
+  # unreliable against this VM — hung indefinitely uploading even a
+  # trivial one-line script, reproducibly, unrelated to cloud-init content,
+  # exit codes, or the SCP/SFTP transfer method (all ruled out one at a
+  # time). The ansible provisioner's own connection path (its proxy
+  # adapter, not Packer's native communicator) proved reliable throughout,
+  # so the wait now runs as a pre_task inside hardening.yml instead — see
+  # the comment there, and docs/packer-explained.md for the full story.
   provisioner "ansible" {
     playbook_file = "../../ansible/hardening.yml"
     # Without this, the plugin's proxy-adapter mode generates an inventory

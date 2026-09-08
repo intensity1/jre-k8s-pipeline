@@ -14,6 +14,28 @@
     # for the hardening itself.
     image_build_date: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H%M') }}"
 
+  pre_tasks:
+    # SSH becoming reachable doesn't mean cloud-init (growpart/resizefs
+    # included) has actually finished — confirmed by direct inspection
+    # during image-pipeline development. This used to be a standalone
+    # Packer "shell" provisioner, but Packer's own native file-upload
+    # mechanism proved unreliable against this VM (hung indefinitely
+    # uploading even a trivial script, unrelated to cloud-init itself —
+    # see docs/packer-explained.md). Ansible's own connection path proved
+    # reliable throughout, so the wait now runs through it instead.
+    #
+    # failed_when accepts rc 2 alongside 0: Proxmox's own built-in
+    # cloud-init integration (used to inject Packer's ephemeral SSH key)
+    # uses the old deprecated single-'user' config syntax, which makes
+    # cloud-init report "degraded done" (exit code 2) even on a fully
+    # successful run — confirmed via `cloud-init status --long` showing a
+    # clean "status: done" with only that one benign deprecation notice.
+    - name: Wait for cloud-init to finish
+      ansible.builtin.command: cloud-init status --wait
+      register: cloud_init_wait
+      changed_when: false
+      failed_when: cloud_init_wait.rc not in [0, 2]
+
   roles:
     - baseline-hardening
     - security-agent

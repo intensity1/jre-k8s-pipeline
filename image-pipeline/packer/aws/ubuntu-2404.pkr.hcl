@@ -75,18 +75,11 @@ source "amazon-ebs" "hardened_ubuntu" {
 build {
   sources = ["source.amazon-ebs.hardened_ubuntu"]
 
-  # See the matching comment in the Proxmox template — SSH being reachable
-  # doesn't mean cloud-init (growpart/resizefs included) has finished.
-  provisioner "shell" {
-    # See the matching comment in the Proxmox template.
-    inline = [
-      "echo 'Waiting for cloud-init to finish (bounded to 5 minutes)...'",
-      "timeout 300 sh -c 'while cloud-init status 2>/dev/null | grep -q running; do sleep 2; done'",
-      "echo 'cloud-init no longer running. Final status:'",
-      "cloud-init status --long || true",
-    ]
-  }
-
+  # See the matching comment in the Proxmox template — the cloud-init-
+  # readiness wait now runs as a pre_task inside hardening.yml, via the
+  # ansible provisioner's own (reliable) connection path, instead of as a
+  # standalone shell provisioner using Packer's native file-upload
+  # mechanism (which proved unreliable — see docs/packer-explained.md).
   provisioner "ansible" {
     playbook_file = "../../ansible/hardening.yml"
     # See the matching comment in the Proxmox template — without this, the

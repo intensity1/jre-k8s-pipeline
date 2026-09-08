@@ -88,7 +88,7 @@ That strictness is the actual point — it's what makes the resulting
 template trustworthy enough for Terraform to clone from later without
 either tool needing to double-check the other's work.
 
-## State as of tonight
+## State as of the first session (2026-09-03/04)
 
 - Base template **VMID 9000** (`ubuntu-2404-cloudinit-base`) now has
   `qemu-guest-agent` installed and enabled — baked in permanently, so
@@ -96,3 +96,71 @@ either tool needing to double-check the other's work.
 - First hardened image successfully built: **VMID 102**,
   `homelab-hardened-ubuntu-24-04-2026-09-04T0309`.
 - Next step: `terraform apply` in `infra/proxmox` (Phase 4) — not yet run.
+
+## Round two (2026-09-07/08): rebuilding the image, and a long detour
+
+Phase 4 ran successfully — Terraform found template 102, cloned it,
+installed k3s, and produced a genuinely working cluster. But it surfaced
+two real problems worth fixing at the source rather than patching around:
+the node had no way to log in (fixed — see `infra/proxmox/main.tf`'s
+`user_account` block) and its disk was far too small (template 9000's
+disk was resized 2.4GB → ~23.5GB; see the LVM read-only-volume note
+above for why that needs `lvchange -prw` first).
+
+Rebuilding the image to pick up that bigger disk turned into the longest
+single debugging thread of the project so far. In order, each one a real
+bug, each one fixed before moving to the next:
+
+1. **Wrong SSH user in Ansible's generated inventory.** The `ansible`
+   provisioner's proxy-adapter mode generated an inventory with
+   `ansible_user=<local WSL username>` instead of `ubuntu` — confirmed by
+   intercepting the temp inventory file before Packer's cleanup deleted
+   it. Every remote path Ansible tried to build was wrong as a result,
+   surfacing as a confusing "No space left on device" on a tiny `mkdir`
+   rather than a clear auth error. Fix: explicit `user = "ubuntu"` on the
+   provisioner (packer-plugin-ansible doesn't reliably infer this from
+   `ssh_username` alone).
+2. **A real "no space" after that** — this one genuinely was disk space,
+   from before the resize took effect on a given clone.
+3. **A race between "SSH is up" and cloud-init actually finishing** —
+   `growpart`/`resizefs` can still be running in the background at the
+   exact moment Packer's communicator considers the VM "ready." Confirmed
+   by watching a clone's `df -h` show the old, pre-resize size the moment
+   Ansible's first task ran.
+4. **A red herring inside the fix for #3**: `cloud-init status --wait`
+   reports exit code `2` ("degraded done"), not `0`, on this VM — caused
+   by Proxmox's own built-in cloud-init integration using an old,
+   deprecated single-`user` config syntax to inject Packer's ephemeral
+   SSH key (nothing in this repo's own config). Confirmed via
+   `qm guest exec <vmid> -- cloud-init status --long` showing a genuinely
+   clean `status: done` alongside that one benign deprecation notice.
+5. **The real, underlying bug**: even after all of the above, a
+   standalone `shell` provisioner running a trivial `echo` / `sleep 3` /
+   `echo` script — nothing to do with cloud-init at all — hung
+   indefinitely and failed identically ("Error uploading script: Process
+   exited with status 1", consistently around 5.5 minutes). That proved
+   the problem was never cloud-init, exit codes, or wait logic — Packer's
+   own native file-upload mechanism cannot reliably talk to this VM.
+   Forcing `ssh_file_transfer_method = "sftp"` (vs. the default SCP) was
+   tried and didn't resolve it either.
+
+**The actual fix**: notice that the `ansible` provisioner — which
+connects through its own proxy adapter, not Packer's native
+communicator — worked reliably through all of this, including
+successfully writing and executing a full playbook run in step 1's
+investigation. So the cloud-init-readiness wait was moved **out of a
+standalone Packer `shell` provisioner and into a `pre_tasks` entry inside
+`hardening.yml` itself**, running through Ansible's own (proven-reliable)
+connection instead of Packer's native one. The underlying cause of *why*
+Packer's own file-upload mechanism specifically hangs against this VM is
+still unconfirmed — worth a dedicated look at Packer's GitHub issues if
+it resurfaces elsewhere — but routing around it entirely was the
+pragmatic fix once the pattern (ansible-path reliable, native-path not)
+was clear.
+
+**Lesson worth keeping**: when a supposedly-fixed thing keeps failing in
+new ways after several real, independently-verified fixes, it's worth
+stepping back and asking "which of my two *tools*, not which of my
+*configs*, might be the actual variable" — the breakthrough here came
+from comparing two different connection mechanisms against each other,
+not from another guess at what the failing one's config should be.
