@@ -59,10 +59,26 @@
     # growpart reports NOCHANGE, resize2fs is a no-op.
     - name: Ensure the root partition and filesystem actually use the full disk
       ansible.builtin.raw: |
-        growpart /dev/sda 1 || true
-        resize2fs /dev/sda1 || true
+        echo '=== lsblk before ==='
+        lsblk
+        echo '=== growpart ==='
+        growpart -v /dev/sda 1 2>&1
+        echo '=== resize2fs ==='
+        resize2fs /dev/sda1 2>&1
+        echo '=== lsblk after ==='
+        lsblk
+        echo '=== df -h after ==='
         df -h /
+      register: resize_result
       changed_when: false
+      failed_when: false
+
+    # Registered raw output isn't printed anywhere by default — surface it
+    # explicitly so we can actually see what growpart/resize2fs reported,
+    # instead of just a pass/fail status that tells us nothing.
+    - name: Show disk-resize diagnostic output
+      ansible.builtin.debug:
+        var: resize_result.stdout_lines
 
     - name: Now that the disk actually has room, gather facts
       ansible.builtin.setup:
