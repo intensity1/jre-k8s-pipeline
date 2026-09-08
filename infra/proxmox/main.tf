@@ -78,6 +78,14 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   }
 
   initialization {
+    # Without this, cloned nodes have no way to log in at all — the golden
+    # image deliberately has no baked-in key (see docs/packer-explained.md),
+    # so each clone needs one injected fresh via cloud-init at boot.
+    user_account {
+      username = "ubuntu"
+      keys     = [trimspace(file(var.ssh_public_key_path))]
+    }
+
     ip_config {
       ipv4 {
         address = "dhcp"

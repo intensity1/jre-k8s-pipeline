@@ -3,7 +3,8 @@ proxmox_api_token     = "REPLACE_ME"
 proxmox_node          = "pve"
 snippet_storage       = "local"
 network_bridge        = "vmbr0"
-ssh_private_key_path  = "/home/youruser/.ssh/id_ed25519"   # absolute path — must be root-authorized on the Proxmox node
+ssh_private_key_path  = "/home/youruser/.ssh/id_ed25519"       # absolute path — must be root-authorized on the Proxmox node
+ssh_public_key_path   = "/home/youruser/.ssh/id_ed25519.pub"   # absolute path — injected into every cloned node's 'ubuntu' user
 
 # Also required as ENVIRONMENT VARIABLES (not read directly by Terraform,
 # but needed by scripts/find_latest_template.py during `terraform apply`):
