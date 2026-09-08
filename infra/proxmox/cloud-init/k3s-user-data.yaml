@@ -15,7 +15,23 @@
 
 runcmd:
   - curl -sfL https://get.k3s.io | sh -
-  - sleep 10
+  # A fixed `sleep 10` was here originally, racing against however long k3s
+  # actually takes to generate its kubeconfig on first start (cert
+  # generation, etc. — not bounded by a constant). Poll for the real file
+  # instead of guessing a duration.
+  - |
+    for i in $(seq 1 30); do
+      [ -f /etc/rancher/k3s/k3s.yaml ] && break
+      sleep 2
+    done
   - cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/k3s.yaml
   - chown ubuntu:ubuntu /home/ubuntu/k3s.yaml
-  - echo "k3s installed. Fetch kubeconfig with: scp ubuntu@<vm-ip>:k3s.yaml ./kubeconfig-proxmox.yaml"
+  # The whole value MUST be quoted here: an unquoted ':' followed by a
+  # space, anywhere in a YAML plain scalar, is parsed as a mapping
+  # key/value separator — not literal text. Without these quotes, YAML
+  # silently turns this single string into a dict at the "with: scp" split,
+  # which crashes cc_runcmd's shellify() and aborts the ENTIRE runcmd
+  # module (all commands are written as one script in one pass) — so
+  # nothing above this line ran either. Confirmed via
+  # `sudo cloud-init schema --system` and /var/log/cloud-init.log.
+  - 'echo "k3s installed. Fetch kubeconfig with: scp ubuntu@<vm-ip>:k3s.yaml ./kubeconfig-proxmox.yaml"'
