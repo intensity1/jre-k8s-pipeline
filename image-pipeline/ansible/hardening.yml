@@ -55,6 +55,12 @@
       retries: 60
       delay: 5
       changed_when: false
+      # `until` only controls when to stop retrying (based on content);
+      # it does NOT stop the raw module from separately failing the task
+      # over a non-zero exit code once that happens. rc 2 ("degraded
+      # done") is expected and fine here — see the comment above — so it
+      # must not fail the task on its own.
+      failed_when: false
 
     # cloud-init reporting "done" turned out NOT to reliably mean growpart
     # has actually finished growing the root filesystem on this image —
