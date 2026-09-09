@@ -15,6 +15,15 @@
 
 runcmd:
   - curl -sfL https://get.k3s.io | sh -
+  # baseline-hardening (image-pipeline/ansible) sets ufw to deny incoming
+  # by default and only opens port 22 — it has no idea this particular
+  # VM will run k3s. Opening the API server port belongs here, not in the
+  # shared hardening playbook, since it's specific to this workload, not
+  # every possible use of the golden image. Confirmed necessary: kubectl
+  # got "i/o timeout" (a firewall silently dropping packets), not
+  # "connection refused" (nothing listening), against a node built from
+  # the hardened image before this was added.
+  - ufw allow 6443/tcp
   # A fixed `sleep 10` was here originally, racing against however long k3s
   # actually takes to generate its kubeconfig on first start (cert
   # generation, etc. — not bounded by a constant). Poll for the real file
