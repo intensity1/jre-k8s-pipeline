@@ -164,3 +164,78 @@ stepping back and asking "which of my two *tools*, not which of my
 *configs*, might be the actual variable" — the breakthrough here came
 from comparing two different connection mechanisms against each other,
 not from another guess at what the failing one's config should be.
+
+## Round three (2026-09-08/09): the disk was non-deterministic
+
+Moving the wait into Ansible fixed the connection hang, but a *new*
+symptom appeared: `gather_facts` (needing its own remote temp directory)
+kept hitting "No space left on device" — even after confirming, via
+direct `qm guest exec` checks, that the disk really had been resized to
+~23.5G at the Proxmox/LVM level. Chased through several more layers:
+
+6. **Ansible's automatic fact-gathering runs before `pre_tasks`** by
+   default — it was racing growpart, same shape as bug #3 but one level
+   earlier in the play. Fixed with `gather_facts: false` plus an explicit
+   `ansible.builtin.setup` task placed *after* the wait.
+7. **Normal Ansible modules stage into a remote temp dir before running**
+   — which was itself failing with ENOSPC before growpart had freed any
+   room, a chicken-and-egg the wait task was supposed to avoid. Fixed by
+   using `ansible.builtin.raw` (no staging at all) for anything that runs
+   before disk space is confirmed.
+8. **cloud-init reporting done ≠ growpart actually finished.** Confirmed
+   directly: a task requiring real free space still failed immediately
+   after the wait task reported success. Stopped trusting cloud-init's
+   status as a proxy entirely and polled real `df` output instead —
+   which *also* never saw space appear within a generous bound.
+9. **The actual disk was never being grown at all, on some runs.** A
+   direct side-by-side comparison was the key move here: Proxmox's own
+   native `qm clone --full 1` against template 9000 correctly produced a
+   ~23.5G disk every time; Packer's `proxmox-clone` builder, cloning the
+   *same* source with identical settings, sometimes produced ~23.5G and
+   sometimes ~3.5G — same config, different result, run back to back.
+   That ruled out every config-level explanation at once: it was a race
+   condition in the clone operation itself (almost certainly the VM
+   starting before the background clone/resize task had genuinely
+   finished copying data), not anything `hardening.yml` or `.pkr.hcl`
+   controlled directly.
+10. A `disks {}` block was tried as a way to declare the target size
+    explicitly rather than trust inheritance — it didn't fix the
+    non-determinism and just left an unwanted, unformatted second disk
+    on every template, so it was removed again once the real fix landed.
+
+**The actual fix**: template 9000 itself had been unlocked and resized
+*after the fact*, twice, by that point (once for the guest agent, once
+for the original disk-size bump) — each time via unlock → `lvchange
+-prw` → `qm resize` → re-lock. Rebuilt the base template completely from
+scratch instead: destroy, recreate, resize **before** ever running `qm
+template`, single clean pass, no unlock/re-lock history behind it at
+all. The very next Packer build produced a correctly, consistently sized
+clone. Whether the volume's resize *history* was the actual mechanism
+(vs. coincidence) was never confirmed with certainty — but the fix
+landed and held.
+
+One more small bug surfaced during the same round: the cloud-init wait's
+`until`/`retries` loop correctly recognized cloud-init was done (by
+content), but the `raw` module still separately failed the *task* on
+cloud-init's own "degraded" exit code (2) — `until` only controls when
+to stop retrying, it doesn't override the module's own pass/fail check.
+Needed an explicit `failed_when: false` alongside it.
+
+**Lesson worth keeping, again**: after enough config-level fixes that
+each turn out to be real but insufficient, it's worth testing the *same
+operation two different ways* (here: Packer's clone vs. Proxmox's own
+native clone, against the identical source) rather than continuing to
+adjust the failing path's settings. That comparison is what turned "this
+config must be subtly wrong" into "this specific operation is racy," and
+it also caught the disks{} block having zero real effect — evidence a
+plain pass/fail status would never have shown.
+
+## Final state (2026-09-09)
+
+Base template **VMID 9000** rebuilt clean (no resize-after-templating
+history), guest agent installed, disk correctly sized at ~25.5G from a
+single pass. First fully clean build against it: **VMID 104**,
+`homelab-hardened-ubuntu-24-04-2026-09-09T0029` — full Ansible run,
+`ok=23 changed=13 failed=0`, disk healthy with 22G free throughout. This
+closes out Phase 2 for real. Next: `terraform apply -replace` in
+`infra/proxmox` to move the k3s node onto this image.
